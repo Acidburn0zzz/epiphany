@@ -27,6 +27,7 @@
 #include "ephy-about-handler.h"
 #include "ephy-settings.h"
 #include "ephy-string.h"
+#include "ephy-view-source-handler.h"
 
 #include <JavaScriptCore/JavaScript.h>
 #include <glib/gi18n.h>
@@ -330,6 +331,9 @@ ephy_embed_utils_is_no_show_address (const char *address)
   for (i = 0; do_not_show_address[i]; i++)
     if (!strcmp (address, do_not_show_address[i]))
       return TRUE;
+
+  if (strstr (address, EPHY_VIEW_SOURCE_SCHEME) == address)
+    return TRUE;
 
   return FALSE;
 }
