@@ -449,9 +449,12 @@ out:
 }
 
 static gboolean
-form_submitted_cb (WebKitDOMHTMLFormElement *dom_form,
-                   WebKitDOMEvent           *dom_event,
-                   WebKitWebPage            *web_page)
+web_page_will_submit_form (WebKitWebPage            *web_page,
+                           WebKitDOMHTMLFormElement *dom_form,
+                           WebKitFrame              *frame,
+                           WebKitFrame              *source_frame,
+                           GPtrArray                *text_field_names,
+                           GPtrArray                *text_field_values)
 {
   EphyWebExtension *extension = ephy_web_extension_get ();
   EphyEmbedFormAuth *form_auth;
@@ -1118,9 +1121,6 @@ web_page_form_controls_associated (WebKitWebPage    *web_page,
 
       /* EphyEmbedFormAuth takes ownership of the nodes */
       form_auth = ephy_embed_form_auth_new (web_page, username_node, password_node, NULL);
-      webkit_dom_event_target_add_event_listener (WEBKIT_DOM_EVENT_TARGET (form), "submit",
-                                                  G_CALLBACK (form_submitted_cb), FALSE,
-                                                  web_page);
       if (username_node) {
         webkit_dom_event_target_add_event_listener (WEBKIT_DOM_EVENT_TARGET (username_node), "blur",
                                                     G_CALLBACK (username_changed_cb), FALSE,
@@ -1277,6 +1277,9 @@ ephy_web_extension_page_created_cb (EphyWebExtension *extension,
                     extension);
   g_signal_connect (web_page, "context-menu",
                     G_CALLBACK (web_page_context_menu),
+                    extension);
+  g_signal_connect (web_page, "will-submit-form",
+                    G_CALLBACK (web_page_will_submit_form),
                     extension);
   g_signal_connect (web_page, "form-controls-associated",
                     G_CALLBACK (web_page_form_controls_associated),
