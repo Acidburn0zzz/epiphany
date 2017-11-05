@@ -465,9 +465,8 @@ out:
 }
 
 static gboolean
-form_submitted_cb (WebKitDOMHTMLFormElement *dom_form,
-                   WebKitDOMEvent           *dom_event,
-                   WebKitWebPage            *web_page)
+on_form_submitted (WebKitWebPage            *web_page,
+                   WebKitDOMHTMLFormElement *dom_form)
 {
   EphyWebExtension *extension = ephy_web_extension_get ();
   EphyEmbedFormAuth *form_auth;
@@ -536,6 +535,41 @@ form_submitted_cb (WebKitDOMHTMLFormElement *dom_form,
   g_free (origin);
 
   return TRUE;
+}
+
+static gboolean
+web_page_will_send_submit_event (WebKitWebPage            *web_page,
+                                 WebKitDOMHTMLFormElement *dom_form,
+                                 WebKitFrame              *frame,
+                                 WebKitFrame              *source_frame,
+                                 GPtrArray                *text_field_names,
+                                 GPtrArray                *text_field_values)
+{
+  g_object_set_data (G_OBJECT (dom_form),
+                     "ephy-form-submit-handled",
+                     GINT_TO_POINTER (TRUE));
+
+  return on_form_submitted (web_page, dom_form);
+}
+
+static gboolean
+web_page_will_submit_form (WebKitWebPage            *web_page,
+                           WebKitDOMHTMLFormElement *dom_form,
+                           WebKitFrame              *frame,
+                           WebKitFrame              *source_frame,
+                           GPtrArray                *text_field_names,
+                           GPtrArray                *text_field_values)
+{
+  gboolean form_submit_handled;
+
+  form_submit_handled =
+    GPOINTER_TO_INT (g_object_steal_data (G_OBJECT (dom_form),
+                                        "ephy-form-submit-handled"));
+
+  if (form_submit_handled)
+    return TRUE;
+
+  return on_form_submitted (web_page, dom_form);
 }
 
 static void
@@ -1177,9 +1211,6 @@ web_page_form_controls_associated (WebKitWebPage    *web_page,
                                             username_node,
                                             password_node,
                                             NULL);
-      webkit_dom_event_target_add_event_listener (WEBKIT_DOM_EVENT_TARGET (form), "submit",
-                                                  G_CALLBACK (form_submitted_cb), FALSE,
-                                                  web_page);
 
       /* Plug in the user autocomplete */
       origin = ephy_uri_to_security_origin (uri);
@@ -1334,6 +1365,12 @@ ephy_web_extension_page_created_cb (EphyWebExtension *extension,
                     extension);
   g_signal_connect (web_page, "context-menu",
                     G_CALLBACK (web_page_context_menu),
+                    extension);
+  g_signal_connect (web_page, "will-send-submit-event",
+                    G_CALLBACK (web_page_will_send_submit_event),
+                    extension);
+  g_signal_connect (web_page, "will-submit-form",
+                    G_CALLBACK (web_page_will_submit_form),
                     extension);
   g_signal_connect (web_page, "form-controls-associated",
                     G_CALLBACK (web_page_form_controls_associated),
