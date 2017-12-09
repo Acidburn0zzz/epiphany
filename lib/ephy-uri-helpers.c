@@ -252,6 +252,104 @@ ephy_remove_tracking_from_uri (const char *uri_string)
   return ret;
 }
 
+static inline void
+script_table_update (GHashTable     *table,
+                     GUnicodeScript  script)
+{
+  gpointer value;
+  gpointer new_value;
+
+  value = g_hash_table_lookup (table, GINT_TO_POINTER (script));
+  new_value = GINT_TO_POINTER (GPOINTER_TO_INT (value) + 1);
+  g_hash_table_replace (table, GINT_TO_POINTER (script), new_value);
+}
+
+static inline int
+script_table_get (GHashTable     *table,
+                  GUnicodeScript  script)
+{
+  gpointer value;
+
+  value = g_hash_table_lookup (table, GINT_TO_POINTER (script));
+  return GPOINTER_TO_INT (value);
+}
+
+static gboolean
+domain_is_safe (const char *domain)
+{
+  static GHashTable *table = NULL;
+  GUnicodeScript script;
+  gunichar *unichars;
+  gunichar saved_zero_char = 0;
+  long num;
+
+  g_assert (domain);
+
+  if (!g_utf8_validate (domain, -1, NULL))
+    return FALSE;
+
+  if (!table)
+    table = g_hash_table_new (g_direct_hash, g_direct_equal);
+  else
+    g_hash_table_remove_all (table);
+
+  unichars = g_utf8_to_ucs4_fast (domain, -1, &num);
+  for (gunichar *u = unichars; u && *u; u++) {
+    script = g_unichar_get_script (*u);
+
+    if (script != G_UNICODE_SCRIPT_COMMON && script != G_UNICODE_SCRIPT_INHERITED)
+      script_table_update (table, script);
+    else
+      num--;
+
+    /* Check for mixed numbering systems. */
+    if (g_unichar_isdigit (*u)) {
+      gunichar zero_char = *u - g_unichar_digit_value (*u);
+      if (saved_zero_char == 0)
+        saved_zero_char = zero_char;
+      else if (zero_char != saved_zero_char)
+        return FALSE;
+    }
+  }
+  g_free (unichars);
+
+  /* Single script, allow. */
+  if (g_hash_table_size (table) < 2)
+    return TRUE;
+
+  /* Chinese scripts. */
+  if (script_table_get (table, G_UNICODE_SCRIPT_LATIN) +
+      script_table_get (table, G_UNICODE_SCRIPT_HAN) +
+      script_table_get (table, G_UNICODE_SCRIPT_BOPOMOFO) == num)
+    return TRUE;
+
+  /* Korean scripts. */
+  if (script_table_get (table, G_UNICODE_SCRIPT_LATIN) +
+      script_table_get (table, G_UNICODE_SCRIPT_HAN) +
+      script_table_get (table, G_UNICODE_SCRIPT_HANGUL) == num)
+    return TRUE;
+
+  /* Japanese scripts. */
+  if (script_table_get (table, G_UNICODE_SCRIPT_LATIN) +
+      script_table_get (table, G_UNICODE_SCRIPT_HAN) +
+      script_table_get (table, G_UNICODE_SCRIPT_HIRAGANA) +
+      script_table_get (table, G_UNICODE_SCRIPT_KATAKANA) == num)
+    return TRUE;
+
+  /* Ban mixes of more than two scripts. */
+  if (g_hash_table_size (table) > 2)
+    return FALSE;
+
+  /* Ban Latin + Cyrillic or Latin + Greek. */
+  if (script_table_get (table, G_UNICODE_SCRIPT_LATIN) > 0 &&
+      (script_table_get (table, G_UNICODE_SCRIPT_CYRILLIC) > 0 ||
+       script_table_get (table, G_UNICODE_SCRIPT_GREEK) > 0))
+    return FALSE;
+
+  /* Allow Latin + any other single script. */
+  return TRUE;
+}
+
 /* Use this function to format a URI for display. The URIs used
  * internally by WebKit may contain percent-encoded characters or
  * punycode, which we do not want the user to see.
@@ -307,8 +405,12 @@ ephy_uri_decode (const char *uri_string)
       return g_strdup (uri_string);
     }
 
-    g_free (uri->host);
-    uri->host = idna_decoded_name;
+    if (domain_is_safe (idna_decoded_name)) {
+      g_free (uri->host);
+      uri->host = idna_decoded_name;
+    } else {
+      g_free (idna_decoded_name);
+    }
   }
 
   /* Note: this also strips passwords from the display URI. */
